@@ -15,7 +15,7 @@ workflows:
         APP_STORE_APPLE_ID: 6757203309
       xcode: latest
 ios:
-  version: 1.0.1+1
+ version: 1.0.1+1
 
     scripts:
       - name: Install CocoaPods
