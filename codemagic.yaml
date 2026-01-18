@@ -14,46 +14,38 @@ workflows:
         XCODE_SCHEME: "MemoryCard"
         APP_STORE_APPLE_ID: 6757203309
       xcode: latest
-    scripts:
-      - name: Set up provisioning profiles settings on Xcode project
-        script: xcode-project use-profiles
-      - name: Increment build number
-        script: |
-          cd $CM_BUILD_DIR
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID")
-          agvtool new-version -all $(($LATEST_BUILD_NUMBER + 1))
-      - name: Build ipa for distribution
-        script: |
-          xcode-project build-ipa \
-            --project "MemoryCard.xcodeproj" \
-            --scheme "$XCODE_SCHEME"
-            - name: Set iOS version
-  script: |
-    set -e
-
-    VERSION="1.0.1"
-
-    echo "Setting app version to $VERSION"
-
-    # Устанавливаем Version (CFBundleShortVersionString)
-    /usr/libexec/PlistBuddy \
-      -c "Set :CFBundleShortVersionString $VERSION" \
-      ios/MemoryCard/Info.plist
-
-    # Получаем текущий build number
-    BUILD=$(/usr/libexec/PlistBuddy \
-      -c "Print :CFBundleVersion" \
-      ios/MemoryCard/Info.plist)
-
-    NEW_BUILD=$((BUILD + 1))
-
-    echo "Increment build number to $NEW_BUILD"
-
-    # Устанавливаем Build (CFBundleVersion)
-    /usr/libexec/PlistBuddy \
-      -c "Set :CFBundleVersion $NEW_BUILD" \
-      ios/MemoryCard/Info.plist
-
+   scripts:
+  - name: Set up provisioning profiles settings on Xcode project
+    script: xcode-project use-profiles
+  - name: Increment version and build number
+    script: |
+      cd $CM_BUILD_DIR
+      
+      # Получаем текущую версию приложения из App Store Connect
+      LATEST_VERSION=$(app-store-connect get-latest-app-store-version "$APP_STORE_APPLE_ID")
+      echo "Latest version in App Store Connect: $LATEST_VERSION"
+      
+      # Увеличиваем минорную версию (например, 1.0 → 1.1)
+      # Или патч-версию (1.0.0 → 1.0.1) — зависит от вашей схемы версионирования
+      NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+      echo "New version will be: $NEW_VERSION"
+      
+      # Устанавливаем новую версию приложения
+      agvtool new-marketing-version $NEW_VERSION
+      
+      # Увеличиваем build number
+      LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID")
+      agvtool new-version -all $(($LATEST_BUILD_NUMBER + 1))
+      
+      # Проверяем изменения
+      echo "Current version after update:"
+      agvtool what-marketing-version
+      agvtool what-version
+  - name: Build ipa for distribution
+    script: |
+      xcode-project build-ipa \
+        --project "MemoryCard.xcodeproj" \
+        --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
     publishing:
