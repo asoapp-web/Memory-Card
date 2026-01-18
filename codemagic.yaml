@@ -14,10 +14,7 @@ workflows:
         XCODE_SCHEME: "MemoryCard"
         APP_STORE_APPLE_ID: 6757203309
       xcode: latest
-   ios:
-        # 👇 МЕНЯЕШЬ ТОЛЬКО ЭТУ СТРОКУ ПЕРЕД КАЖДЫМ РЕЛИЗОМ
-        # format: VERSION+BUILD
-        version: 1.0.1+1
+   ios: version: 1.0.1+1
 
     scripts:
       - name: Install CocoaPods
