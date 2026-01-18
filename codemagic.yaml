@@ -1,21 +1,22 @@
 workflows:
   memory-card-workflow:
-    name: MemoryCard
+    name: Memory Card iOS Release
     max_build_duration: 120
-    instance_type: mac_mini_m1
-    integrations:
-      app_store_connect: Memory Card API
+
     environment:
+      xcode: latest
+
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.MindForge
+
       vars:
         BUNDLE_ID: "com.MindForge"
         XCODE_SCHEME: "MemoryCard"
         APP_STORE_APPLE_ID: 6757203309
-      xcode: latest
-ios:
- version: 1.0.1
+
+      ios:
+        version: 1.0.1+1
 
     scripts:
       - name: Install CocoaPods
@@ -23,7 +24,7 @@ ios:
           gem install cocoapods
           pod install
 
-      - name: Build IPA
+      - name: Build archive
         script: |
           xcodebuild \
             -workspace MemoryCard.xcworkspace \
