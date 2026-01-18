@@ -1,50 +1,62 @@
 workflows:
   memory-card-workflow:
-    name: Memory Card iOS Release
+    name: MemoryCard
     max_build_duration: 120
-
+    instance_type: mac_mini_m1
+    integrations:
+      app_store_connect: Memory Card API
     environment:
-      xcode: latest
-
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.MindForge
-
       vars:
         BUNDLE_ID: "com.MindForge"
         XCODE_SCHEME: "MemoryCard"
         APP_STORE_APPLE_ID: 6757203309
-
-      ios:
-        version: 1.0.1+1
-
+      xcode: latest
     scripts:
-      - name: Install CocoaPods
+      - name: Set up provisioning profiles settings on Xcode project
+        script: xcode-project use-profiles
+      - name: Increment build number
         script: |
-          gem install cocoapods
-          pod install
+          cd $CM_BUILD_DIR
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID")
+          agvtool new-version -all $(($LATEST_BUILD_NUMBER + 1))
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --project "MemoryCard.xcodeproj" \
+            --scheme "$XCODE_SCHEME"
+            - name: Set iOS version
+  script: |
+    set -e
 
-      - name: Build archive
-        script: |
-          xcodebuild \
-            -workspace MemoryCard.xcworkspace \
-            -scheme "$XCODE_SCHEME" \
-            -configuration Release \
-            -archivePath build/MemoryCard.xcarchive \
-            archive
+    VERSION="1.0.1"
 
-      - name: Export IPA
-        script: |
-          xcodebuild \
-            -exportArchive \
-            -archivePath build/MemoryCard.xcarchive \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath build/ipa
+    echo "Setting app version to $VERSION"
+
+    # Устанавливаем Version (CFBundleShortVersionString)
+    /usr/libexec/PlistBuddy \
+      -c "Set :CFBundleShortVersionString $VERSION" \
+      ios/MemoryCard/Info.plist
+
+    # Получаем текущий build number
+    BUILD=$(/usr/libexec/PlistBuddy \
+      -c "Print :CFBundleVersion" \
+      ios/MemoryCard/Info.plist)
+
+    NEW_BUILD=$((BUILD + 1))
+
+    echo "Increment build number to $NEW_BUILD"
+
+    # Устанавливаем Build (CFBundleVersion)
+    /usr/libexec/PlistBuddy \
+      -c "Set :CFBundleVersion $NEW_BUILD" \
+      ios/MemoryCard/Info.plist
 
     artifacts:
-      - build/ipa/*.ipa
-
+      - build/ios/ipa/*.ipa
     publishing:
-      app_store_connect:
-        apple_id: $APP_STORE_APPLE_ID
+      app_store_connect: 
+        auth: integration
         submit_to_testflight: true
