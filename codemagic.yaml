@@ -4,7 +4,7 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m1
     integrations:
-      app_store_connect: Memory Card API
+      app_store_connect: 24628254N2
     environment:
       ios_signing:
         distribution_type: app_store
@@ -13,40 +13,110 @@ workflows:
         BUNDLE_ID: "com.MindForge"
         XCODE_SCHEME: "MemoryCard"
         APP_STORE_APPLE_ID: 6757203309
+        APP_STORE_APP_ID: "com.MindForge"  # Добавляем App ID для доступа к версиям
       xcode: latest
     scripts:
       - name: Set up provisioning profiles settings on Xcode project
         script: xcode-project use-profiles
+      
+      - name: Debug info
+        script: |
+          echo "=== DEBUG INFO ==="
+          echo "Build directory: $CM_BUILD_DIR"
+          echo "App Store Apple ID: $APP_STORE_APPLE_ID"
+          echo "Bundle ID: $BUNDLE_ID"
+          echo "=================="
+          
+          # Проверяем доступ к App Store Connect
+          echo "Testing App Store Connect connection..."
+          app-store-connect get-builds "$APP_STORE_APPLE_ID" || true
+      
+      - name: Get current project version
+        script: |
+          cd $CM_BUILD_DIR
+          echo "=== Current project version ==="
+          
+          # Способ 1: Используем agvtool
+          CURRENT_VERSION=$(agvtool what-marketing-version -terse1 2>/dev/null || echo "1.0")
+          echo "Current version from agvtool: $CURRENT_VERSION"
+          
+          # Способ 2: Ищем Info.plist
+          INFO_PLIST=$(find . -name "Info.plist" -type f | head -1)
+          if [ -f "$INFO_PLIST" ]; then
+            CURRENT_VERSION_PLIST=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" 2>/dev/null || echo "1.0")
+            echo "Current version from Info.plist: $CURRENT_VERSION_PLIST"
+            CURRENT_VERSION="$CURRENT_VERSION_PLIST"
+          fi
+          
+          # Если не нашли версию, используем 1.0
+          if [ -z "$CURRENT_VERSION" ] || [ "$CURRENT_VERSION" = "" ]; then
+            CURRENT_VERSION="1.0"
+          fi
+          
+          echo "Using version: $CURRENT_VERSION"
+          export CURRENT_VERSION
+      
       - name: Increment version and build number
         script: |
           cd $CM_BUILD_DIR
+          echo "=== Incrementing version ==="
           
-          # Получаем текущую версию приложения из App Store Connect
-          LATEST_VERSION=$(app-store-connect get-latest-app-store-version "$APP_STORE_APPLE_ID")
-          echo "Latest version in App Store Connect: $LATEST_VERSION"
+          # Получаем текущую версию из предыдущего шага
+          if [ -z "$CURRENT_VERSION" ]; then
+            CURRENT_VERSION="1.0"
+          fi
           
-          # Увеличиваем минорную версию (например, 1.0 → 1.1)
-          NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
-          echo "New version will be: $NEW_VERSION"
+          echo "Current version: $CURRENT_VERSION"
           
-          # Устанавливаем новую версию приложения
+          # Простой способ увеличения версии: добавляем .1
+          if [[ $CURRENT_VERSION =~ ^[0-9]+\.[0-9]+$ ]]; then
+            # Формат X.Y → X.Y.1
+            NEW_VERSION="${CURRENT_VERSION}.1"
+          elif [[ $CURRENT_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            # Формат X.Y.Z → увеличиваем Z
+            IFS='.' read -ra PARTS <<< "$CURRENT_VERSION"
+            PARTS[2]=$((PARTS[2] + 1))
+            NEW_VERSION="${PARTS[0]}.${PARTS[1]}.${PARTS[2]}"
+          else
+            # Любой другой формат → добавляем .1
+            NEW_VERSION="${CURRENT_VERSION}.1"
+          fi
+          
+          # Альтернативно: просто увеличиваем до 1.1 если текущая 1.0
+          if [ "$CURRENT_VERSION" = "1.0" ]; then
+            NEW_VERSION="1.0.1"  # Или "1.1" в зависимости от вашей схемы
+          fi
+          
+          echo "New version: $NEW_VERSION"
+          
+          # Устанавливаем новую версию
+          echo "Setting new marketing version..."
           agvtool new-marketing-version $NEW_VERSION
           
-          # Увеличиваем build number
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID")
-          agvtool new-version -all $(($LATEST_BUILD_NUMBER + 1))
+          # Получаем и увеличиваем build number
+          echo "Getting latest build number from App Store Connect..."
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo "0")
+          echo "Latest build number: $LATEST_BUILD_NUMBER"
           
-          # Проверяем изменения
-          echo "Current version after update:"
-          agvtool what-marketing-version
-          agvtool what-version
+          NEW_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
+          echo "New build number: $NEW_BUILD_NUMBER"
+          
+          agvtool new-version -all $NEW_BUILD_NUMBER
+          
+          # Проверяем результат
+          echo "=== Verification ==="
+          echo "Marketing version: $(agvtool what-marketing-version)"
+          echo "Build version: $(agvtool what-version)"
+      
       - name: Build ipa for distribution
         script: |
           xcode-project build-ipa \
             --project "MemoryCard.xcodeproj" \
             --scheme "$XCODE_SCHEME"
+    
     artifacts:
       - build/ios/ipa/*.ipa
+    
     publishing:
       app_store_connect:
         auth: integration
