@@ -14,22 +14,38 @@ workflows:
         XCODE_SCHEME: "MemoryCard"
         APP_STORE_APPLE_ID: 6757203309
       xcode: latest
+   ios:
+        # 👇 МЕНЯЕШЬ ТОЛЬКО ЭТУ СТРОКУ ПЕРЕД КАЖДЫМ РЕЛИЗОМ
+        # format: VERSION+BUILD
+        version: 1.0.1+1
+
     scripts:
-      - name: Set up provisioning profiles settings on Xcode project
-        script: xcode-project use-profiles
-      - name: Increment build number
+      - name: Install CocoaPods
         script: |
-          cd $CM_BUILD_DIR
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID")
-          agvtool new-version -all $(($LATEST_BUILD_NUMBER + 1))
-      - name: Build ipa for distribution
+          gem install cocoapods
+          pod install
+
+      - name: Build IPA
         script: |
-          xcode-project build-ipa \
-            --project "MemoryCard.xcodeproj" \
-            --scheme "$XCODE_SCHEME"
+          xcodebuild \
+            -workspace MemoryCard.xcworkspace \
+            -scheme "$XCODE_SCHEME" \
+            -configuration Release \
+            -archivePath build/MemoryCard.xcarchive \
+            archive
+
+      - name: Export IPA
+        script: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/MemoryCard.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/ipa
+
     artifacts:
-      - build/ios/ipa/*.ipa
+      - build/ipa/*.ipa
+
     publishing:
-      app_store_connect: 
-        auth: integration
+      app_store_connect:
+        apple_id: $APP_STORE_APPLE_ID
         submit_to_testflight: true
