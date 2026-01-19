@@ -13,79 +13,109 @@ workflows:
         BUNDLE_ID: "com.MindForge"
         XCODE_SCHEME: "MemoryCard"
         APP_STORE_APPLE_ID: 6757203309
-        # Новые версии - 1.2 и автоматический build number
+        # ЯВНО указываем версии - не надеемся на скрипт
         NEW_MARKETING_VERSION: "1.2"
+        NEW_BUILD_NUMBER: "2"  # Явно указываем 2 или 3
       xcode: latest
     scripts:
       - name: Set up provisioning profiles settings on Xcode project
         script: xcode-project use-profiles
       
-      - name: UPDATE VERSIONS TO 1.2
+      - name: DEBUG: Проверить что есть
         script: |
           cd $CM_BUILD_DIR
-          echo "=== UPDATING TO VERSION $NEW_MARKETING_VERSION ==="
+          echo "=== DEBUG: ПРОЕКТ ==="
+          echo "Директория: $(pwd)"
+          ls -la
+          echo "=== Info.plist файлы ==="
+          find . -name "Info.plist" -type f
+          echo "=== Содержимое первого Info.plist ==="
+          FIRST=$(find . -name "Info.plist" -type f | head -1)
+          if [ -f "$FIRST" ]; then
+            cat "$FIRST"
+          fi
+      
+      - name: СИЛОЙ МЕНЯЕМ ВЕРСИИ
+        script: |
+          cd $CM_BUILD_DIR
+          echo "=== СИЛОВОЕ ОБНОВЛЕНИЕ ==="
+          echo "Устанавливаем версию: $NEW_MARKETING_VERSION"
+          echo "Устанавливаем сборку: $NEW_BUILD_NUMBER"
           
-          # 1. Получаем последний build number
-          echo "Getting latest build number from App Store Connect..."
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo "0")
-          echo "Latest build number: $LATEST_BUILD_NUMBER"
+          # 1. Находим КОРНЕВОЙ Info.plist
+          echo "Ищем главный Info.plist..."
+          # Пробуем разные пути
+          POSSIBLE_PATHS=(
+            "./MemoryCard/Info.plist"
+            "./ios/MemoryCard/Info.plist" 
+            "./MemoryCard/Resources/Info.plist"
+            "./ios/Info.plist"
+            "$(find . -name "Info.plist" -type f | head -1)"
+          )
           
-          NEW_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
-          echo "Setting marketing version to: $NEW_MARKETING_VERSION"
-          echo "Setting build number to: $NEW_BUILD_NUMBER"
-          
-          # 2. Обновляем все Info.plist файлы
-          echo "=== Updating ALL Info.plist files ==="
-          find . -name "Info.plist" -type f | while read PLIST; do
-            echo "Processing: $PLIST"
-            
-            if [ -f "$PLIST" ]; then
-              # Получаем текущие значения
-              CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "1.0")
-              CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "1")
-              echo "  Current: version=$CURRENT_VERSION, build=$CURRENT_BUILD"
-              
-              # Устанавливаем новые значения - ИСПРАВЛЕНО!
-              # Удаляем старое значение сначала
-              /usr/libexec/PlistBuddy -c "Delete :CFBundleShortVersionString" "$PLIST" 2>/dev/null
-              /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $NEW_MARKETING_VERSION" "$PLIST" 2>/dev/null
-              echo "  ✓ Set version to $NEW_MARKETING_VERSION"
-              
-              /usr/libexec/PlistBuddy -c "Delete :CFBundleVersion" "$PLIST" 2>/dev/null
-              /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $NEW_BUILD_NUMBER" "$PLIST" 2>/dev/null
-              echo "  ✓ Set build to $NEW_BUILD_NUMBER"
-              
-              # Проверяем
-              CHECK_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "ERROR")
-              CHECK_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "ERROR")
-              echo "  Updated: version=$CHECK_VERSION, build=$CHECK_BUILD"
-            else
-              echo "  ✗ File not found"
+          MAIN_PLIST=""
+          for path in "${POSSIBLE_PATHS[@]}"; do
+            if [ -f "$path" ]; then
+              MAIN_PLIST="$path"
+              echo "Нашли Info.plist: $MAIN_PLIST"
+              break
             fi
-            echo "  ---"
           done
           
-          # 3. ПРОВЕРКА ПЕРЕД СБОРКОЙ
-          echo "=== FINAL VERIFICATION BEFORE BUILD ==="
-          echo "Checking first Info.plist:"
-          FIRST_PLIST=$(find . -name "Info.plist" -type f | head -1)
-          if [ -f "$FIRST_PLIST" ]; then
-            FINAL_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$FIRST_PLIST" 2>/dev/null || echo "ERROR_READING")
-            FINAL_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$FIRST_PLIST" 2>/dev/null || echo "ERROR_READING")
-            echo "  Final values: version=$FINAL_VERSION, build=$FINAL_BUILD"
-            
-            if [ "$FINAL_VERSION" != "$NEW_MARKETING_VERSION" ] || [ "$FINAL_BUILD" != "$NEW_BUILD_NUMBER" ]; then
-              echo "  ⚠️ WARNING: Values don't match expected!"
-              echo "  Expected: version=$NEW_MARKETING_VERSION, build=$NEW_BUILD_NUMBER"
-            else
-              echo "  ✅ SUCCESS: All values match!"
-            fi
+          if [ -z "$MAIN_PLIST" ]; then
+            echo "ERROR: Info.plist не найден!"
+            find . -name "*.plist" -type f
+            exit 1
           fi
+          
+          # 2. Показываем текущие значения
+          echo "Текущие значения в $MAIN_PLIST:"
+          CURRENT_V=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$MAIN_PLIST" 2>/dev/null || echo "НЕ НАЙДЕН")
+          CURRENT_B=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$MAIN_PLIST" 2>/dev/null || echo "НЕ НАЙДЕН")
+          echo "  Версия: $CURRENT_V"
+          echo "  Сборка: $CURRENT_B"
+          
+          # 3. СИЛОЙ меняем значения
+          echo "Меняем значения..."
+          
+          # Удаляем старые ключи (если есть)
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleShortVersionString" "$MAIN_PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleVersion" "$MAIN_PLIST" 2>/dev/null || true
+          
+          # Добавляем новые
+          /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $NEW_MARKETING_VERSION" "$MAIN_PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $NEW_BUILD_NUMBER" "$MAIN_PLIST"
+          
+          # 4. Проверяем
+          echo "Проверяем результат:"
+          FINAL_V=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$MAIN_PLIST")
+          FINAL_B=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$MAIN_PLIST")
+          echo "  Финальная версия: $FINAL_V"
+          echo "  Финальная сборка: $FINAL_B"
+          
+          if [ "$FINAL_V" = "$NEW_MARKETING_VERSION" ] && [ "$FINAL_B" = "$NEW_BUILD_NUMBER" ]; then
+            echo "✅ УСПЕХ: Версии установлены правильно!"
+          else
+            echo "❌ ОШИБКА: Версии не совпадают!"
+            exit 1
+          fi
+          
+          # 5. Меняем ВСЕ остальные Info.plist на всякий случай
+          echo "Обновляем остальные Info.plist файлы..."
+          find . -name "Info.plist" -type f | while read plist; do
+            if [ "$plist" != "$MAIN_PLIST" ]; then
+              echo "  Также обновляем: $plist"
+              /usr/libexec/PlistBuddy -c "Delete :CFBundleShortVersionString" "$plist" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Delete :CFBundleVersion" "$plist" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $NEW_MARKETING_VERSION" "$plist" 2>/dev/null || true
+              /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $NEW_BUILD_NUMBER" "$plist" 2>/dev/null || true
+            fi
+          done
       
       - name: Build IPA for App Store
         script: |
-          echo "=== BUILDING FOR APP STORE ==="
-          echo "Expected: Version $NEW_MARKETING_VERSION, Build number from previous step"
+          echo "=== СОБИРАЕМ IPA ==="
+          echo "Ожидаем: Версия $NEW_MARKETING_VERSION, Сборка $NEW_BUILD_NUMBER"
           
           xcode-project build-ipa \
             --project "MemoryCard.xcodeproj" \
@@ -97,7 +127,5 @@ workflows:
     publishing:
       app_store_connect:
         auth: integration
-        # НЕ отправляем в TestFlight
         submit_to_testflight: false
-        # Автоматически отправляем на модерацию в App Store
         submit_to_app_store: true
