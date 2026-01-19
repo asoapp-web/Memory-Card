@@ -20,43 +20,40 @@ workflows:
       - name: Set up provisioning profiles settings on Xcode project
         script: xcode-project use-profiles
       
-      - name: GET LATEST BUILD NUMBER
-        script: |
-          cd $CM_BUILD_DIR
-          echo "=== GETTING LATEST BUILD NUMBER ==="
-          
-          # Получаем последний build number из App Store Connect
-          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo "0")
-          echo "Latest build number in App Store Connect: $LATEST_BUILD_NUMBER"
-          
-          # Увеличиваем на 1
-          NEW_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
-          echo "New build number will be: $NEW_BUILD_NUMBER"
-          
-          # Экспортируем переменную для следующего шага
-          export NEW_BUILD_NUMBER
-      
       - name: UPDATE VERSIONS TO 1.2
         script: |
           cd $CM_BUILD_DIR
           echo "=== UPDATING TO VERSION $NEW_MARKETING_VERSION ==="
+          
+          # 1. Получаем последний build number
+          echo "Getting latest build number from App Store Connect..."
+          LATEST_BUILD_NUMBER=$(app-store-connect get-latest-app-store-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo "0")
+          echo "Latest build number: $LATEST_BUILD_NUMBER"
+          
+          NEW_BUILD_NUMBER=$((LATEST_BUILD_NUMBER + 1))
           echo "Setting marketing version to: $NEW_MARKETING_VERSION"
           echo "Setting build number to: $NEW_BUILD_NUMBER"
           
-          # 1. Обновляем все Info.plist файлы
+          # 2. Обновляем все Info.plist файлы
           echo "=== Updating ALL Info.plist files ==="
           find . -name "Info.plist" -type f | while read PLIST; do
             echo "Processing: $PLIST"
             
             if [ -f "$PLIST" ]; then
               # Получаем текущие значения
-              CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "1.1")
-              CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "2")
+              CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "1.0")
+              CURRENT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST" 2>/dev/null || echo "1")
               echo "  Current: version=$CURRENT_VERSION, build=$CURRENT_BUILD"
               
-              # Устанавливаем новые значения
-              /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $NEW_MARKETING_VERSION" "$PLIST" 2>/dev/null && echo "  ✓ Set version to $NEW_MARKETING_VERSION"
-              /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD_NUMBER" "$PLIST" 2>/dev/null && echo "  ✓ Set build to $NEW_BUILD_NUMBER"
+              # Устанавливаем новые значения - ИСПРАВЛЕНО!
+              # Удаляем старое значение сначала
+              /usr/libexec/PlistBuddy -c "Delete :CFBundleShortVersionString" "$PLIST" 2>/dev/null
+              /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $NEW_MARKETING_VERSION" "$PLIST" 2>/dev/null
+              echo "  ✓ Set version to $NEW_MARKETING_VERSION"
+              
+              /usr/libexec/PlistBuddy -c "Delete :CFBundleVersion" "$PLIST" 2>/dev/null
+              /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $NEW_BUILD_NUMBER" "$PLIST" 2>/dev/null
+              echo "  ✓ Set build to $NEW_BUILD_NUMBER"
               
               # Проверяем
               CHECK_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "ERROR")
@@ -68,21 +65,27 @@ workflows:
             echo "  ---"
           done
           
-          # 2. Обновляем через agvtool
-          echo "=== Updating via agvtool ==="
-          agvtool new-marketing-version "$NEW_MARKETING_VERSION" 2>/dev/null || echo "agvtool marketing version completed"
-          agvtool new-version -all "$NEW_BUILD_NUMBER" 2>/dev/null || echo "agvtool build version completed"
-          
-          echo "=== FINAL VERIFICATION ==="
-          echo "Agvtool reports:"
-          agvtool what-marketing-version 2>/dev/null || echo "Cannot get marketing version"
-          agvtool what-version 2>/dev/null || echo "Cannot get build version"
+          # 3. ПРОВЕРКА ПЕРЕД СБОРКОЙ
+          echo "=== FINAL VERIFICATION BEFORE BUILD ==="
+          echo "Checking first Info.plist:"
+          FIRST_PLIST=$(find . -name "Info.plist" -type f | head -1)
+          if [ -f "$FIRST_PLIST" ]; then
+            FINAL_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$FIRST_PLIST" 2>/dev/null || echo "ERROR_READING")
+            FINAL_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$FIRST_PLIST" 2>/dev/null || echo "ERROR_READING")
+            echo "  Final values: version=$FINAL_VERSION, build=$FINAL_BUILD"
+            
+            if [ "$FINAL_VERSION" != "$NEW_MARKETING_VERSION" ] || [ "$FINAL_BUILD" != "$NEW_BUILD_NUMBER" ]; then
+              echo "  ⚠️ WARNING: Values don't match expected!"
+              echo "  Expected: version=$NEW_MARKETING_VERSION, build=$NEW_BUILD_NUMBER"
+            else
+              echo "  ✅ SUCCESS: All values match!"
+            fi
+          fi
       
       - name: Build IPA for App Store
         script: |
           echo "=== BUILDING FOR APP STORE ==="
-          echo "Version: $NEW_MARKETING_VERSION"
-          echo "Build: $NEW_BUILD_NUMBER"
+          echo "Expected: Version $NEW_MARKETING_VERSION, Build number from previous step"
           
           xcode-project build-ipa \
             --project "MemoryCard.xcodeproj" \
